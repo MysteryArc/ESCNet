@@ -54,7 +54,6 @@ class SSN(nn.Module):
         self.n_spixels = n_spixels
         # 迭代次数
         self.n_iters = n_iters
-
         # 特征转换器，用于调整输入特征的尺寸
         self.feat_cvrter = feat_cvrter
 

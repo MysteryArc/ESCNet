@@ -124,7 +124,7 @@ class ESCNet(nn.Module):
             Conv3x3(out_ch, 2, bn=False, act=False),
             nn.LogSoftmax(dim=1)
         )
-        self.fuse_net = RefineNet(out_ch, 5) # 输出通道从2改为5, 将变化检测任务迁移到建筑损坏评估任务
+        self.fuse_net = RefineNet(out_ch, 2) # 输出通道从2改为5, 将变化检测任务迁移到建筑损坏评估任务
         self.act_out = nn.LogSoftmax(dim=1)
         self.omega2 = (0.01*n_spixels)**2
 
