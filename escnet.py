@@ -121,10 +121,10 @@ class ESCNet(nn.Module):
         self.ssn = SSN(feat_cvrter, n_iters, n_spixels, n_filters, in_ch, out_ch, cnn=True)
         self.cd_net = SiamUNet_diff(out_ch-2, out_ch)
         self.conv_ds = nn.Sequential(
-            Conv3x3(out_ch, 2, bn=False, act=False),
+            Conv3x3(out_ch, 5, bn=False, act=False),
             nn.LogSoftmax(dim=1)
         )
-        self.fuse_net = RefineNet(out_ch, 2) # 输出通道从2改为5, 将变化检测任务迁移到建筑损坏评估任务
+        self.fuse_net = RefineNet(out_ch, 5) # 输出通道从2改为5, 将变化检测任务迁移到建筑损坏评估任务
         self.act_out = nn.LogSoftmax(dim=1)
         self.omega2 = (0.01*n_spixels)**2
 

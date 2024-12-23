@@ -36,7 +36,6 @@ def update_confusion_matrix(conf_matrix, preds, labels):
 
 def compute_metrics(conf_matrix):
     num_classes = conf_matrix.shape[0]
-    
     # mIoU
     ious = []
     for c in range(num_classes):
@@ -68,9 +67,9 @@ def main():
     # 初始化参数
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
-    LR = 0.01
-    NUM_EPOCH = 50
-    BATCH_SIZE = 8
+    LR = 0.002
+    NUM_EPOCH = 20
+    BATCH_SIZE = 10
     MOMENTUM = 0.9
     ETA_POS = 2
     GAMMA_CLR = 0.1
@@ -83,8 +82,8 @@ def main():
     else:
         raise Exception("No cuda available.")
     
-    train_loader = DataLoader(train_set, BATCH_SIZE)
-    val_loader = DataLoader(val_set, BATCH_SIZE)
+    train_loader = DataLoader(train_set, BATCH_SIZE, num_workers=28)
+    val_loader = DataLoader(val_set, BATCH_SIZE, num_workers=28)
     model = ESCNet(
         FeatureConverter(ETA_POS, GAMMA_CLR, OFFSETS), 
         n_iters=5, 
@@ -98,7 +97,7 @@ def main():
     # 定义损失函数、优化器、学习率调度器
     creterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=1e-5)
-    scheduler = StepLR(optimizer, step_size=10, gamma=0.5)
+    scheduler = StepLR(optimizer, step_size=2, gamma=0.5)
 
     # 训练循环
     start_time = time.time()
@@ -116,9 +115,9 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             # 前向传播
-            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
             loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
-            train_loss += loss.item()
+            train_loss += loss
 
             # 反向传播
             optimizer.zero_grad()
@@ -126,7 +125,7 @@ def main():
             optimizer.step()
 
             # 更新混淆矩阵
-            preds = torch.argmax(prob, dim=1)[0]
+            preds = torch.argmax(prob, dim=1)
             conf_matrix = update_confusion_matrix(conf_matrix, preds, target)
 
         # 更新学习率
@@ -153,7 +152,7 @@ def main():
                 prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
                 loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
                 val_loss += loss.item()
-                preds = torch.argmax(prob, dim=1)[0]
+                preds = torch.argmax(prob, dim=1)
                 conf_matrix = update_confusion_matrix(conf_matrix, preds, target)
 
         # 计算评价指标
@@ -170,7 +169,7 @@ def main():
             save_path = './checkpoints/241223.pt'
             torch.save(model, save_path)
             best_loss = val_loss
-            print('save')
+            # print('save')
     end_time = time.time()
     print('{}轮训练的总时长为：{:.1f}秒'.format(NUM_EPOCH, end_time - start_time))
 
