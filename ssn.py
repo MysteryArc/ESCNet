@@ -27,7 +27,7 @@ class FeatureExtactor(nn.Module):
         f3 = self.conv3(p2) # channel n_filters
 
         # Resize feature maps
-        f2_rsz = F.interpolate(f2, size=f1.shape[2:], mode='bilinear', align_corners=True) 
+        f2_rsz = F.interpolate(f2, size=f1.shape[2:], mode='bilinear', align_corners=True)
         f3_rsz = F.interpolate(f3, size=f1.shape[2:], mode='bilinear', align_corners=True)
 
         # Concatenate multi-level features and fuse them

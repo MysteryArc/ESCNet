@@ -77,8 +77,15 @@ class GetDataset(Dataset):
             target_tensor: 转换为tensor张量的标签图像
         '''
 
-        # Convert the image to a tensor
-        target_tensor = torch.tensor(np.array(target_image))
+        # 转换为 numpy 数组
+        target_array = np.array(target_image)
+        
+        # 将像素值为5的部分设置为0
+        target_array[target_array == 5] = 1
+
+        # 转换为 PyTorch 张量
+        target_tensor = torch.tensor(target_array, dtype=torch.int64)
+        
         return target_tensor
     
     def to_tensor(self, image):

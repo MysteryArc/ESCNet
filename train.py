@@ -24,12 +24,6 @@ def update_confusion_matrix(conf_matrix, preds, labels):
     labels_flat = labels.view(-1).long().cpu().numpy()
 
     for p, t in zip(preds_flat, labels_flat):
-        if p > 4:
-            print('error: p = {}'.format(p))
-            p = 4
-        if t > 4:
-            print('error: t = {}'.format(t))
-            t = 4
         conf_matrix[t, p] += 1
 
     return conf_matrix
@@ -82,8 +76,8 @@ def main():
     else:
         raise Exception("No cuda available.")
     
-    train_loader = DataLoader(train_set, BATCH_SIZE, num_workers=28)
-    val_loader = DataLoader(val_set, BATCH_SIZE, num_workers=28)
+    train_loader = DataLoader(train_set, BATCH_SIZE, num_workers=8, pin_memory=True)
+    val_loader = DataLoader(val_set, BATCH_SIZE, num_workers=8, pin_memory=True)
     model = ESCNet(
         FeatureConverter(ETA_POS, GAMMA_CLR, OFFSETS), 
         n_iters=5, 
@@ -149,7 +143,7 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             with torch.no_grad():
-                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
                 loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
                 val_loss += loss.item()
                 preds = torch.argmax(prob, dim=1)
