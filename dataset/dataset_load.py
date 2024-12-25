@@ -14,6 +14,7 @@ import os
 import torchvision.transforms as transforms
 import torch
 import numpy as np
+import skimage
 
 class GetDataset(Dataset):
     def __init__(self, root_dir) -> None:
@@ -48,6 +49,10 @@ class GetDataset(Dataset):
         '''
 
         super().__init__()
+        self.pre_images = []
+        self.post_images = []
+        self.building_targets = []
+        self.damage_targets = []
         # 进入数据集目录
         self.pre_img_dir = os.path.join(root_dir, 'pre', 'images')
         self.pre_tgt_dir = os.path.join(root_dir, 'pre', 'targets')
@@ -59,6 +64,22 @@ class GetDataset(Dataset):
         self.post_img_list = os.listdir(self.post_img_dir)
         self.pre_tgt_list = os.listdir(self.pre_tgt_dir)
         self.post_tgt_list = os.listdir(self.post_tgt_dir)
+        if len(self.pre_img_list) != len(self.post_img_list) or len(self.pre_img_list) != len(self.pre_tgt_list) or len(self.pre_img_list) != len(self.post_tgt_list):
+            raise ValueError("数据集数量不正确!")
+        
+        for image_name in self.pre_img_list:
+            pre_img_name = image_name
+            post_img_name = pre_img_name.replace('pre_disaster', 'post_disaster')
+            pre_tgt_name = pre_img_name.replace('disaster', 'disaster_target')
+            post_tgt_name = post_img_name.replace('disaster', 'disaster_target')
+            pre_img_path = os.path.join(self.pre_img_dir, pre_img_name)
+            post_img_path = os.path.join(self.post_img_dir, post_img_name)
+            pre_tgt_path = os.path.join(self.pre_tgt_dir, pre_tgt_name)
+            post_tgt_path = os.path.join(self.post_tgt_dir, post_tgt_name)
+            self.pre_images.append(pre_img_path)
+            self.post_images.append(post_img_path)
+            self.building_targets.append(pre_tgt_path)
+            self.damage_targets.append(post_tgt_path)
 
         self.transforms_target = transforms.Compose(
             [
@@ -98,25 +119,17 @@ class GetDataset(Dataset):
         Returns:
             image_tensor: 转换为张量的图像
         '''
+        
         image_xylab = rgb_to_xylab(image)
         image_tensor = torch.tensor(image_xylab).permute(2, 0, 1).float()
         return image_tensor
 
     def __getitem__(self, index):
-        pre_img_name = self.pre_img_list[index]
-        post_img_name = pre_img_name.replace('pre_disaster', 'post_disaster')
-        pre_tgt_name = pre_img_name.replace('disaster', 'disaster_target')
-        post_tgt_name = post_img_name.replace('disaster', 'disaster_target')
-        pre_img_path = os.path.join(self.pre_img_dir, pre_img_name)
-        post_img_path = os.path.join(self.post_img_dir, post_img_name)
-        pre_tgt_path = os.path.join(self.pre_tgt_dir, pre_tgt_name)
-        post_tgt_path = os.path.join(self.post_tgt_dir, post_tgt_name)
-
         # 读取图像
-        temp_pre_image = imread(pre_img_path)
-        temp_post_image = imread(post_img_path)
-        temp_building_target = Image.open(pre_tgt_path)
-        temp_damage_target = Image.open(post_tgt_path)
+        temp_pre_image = imread(self.pre_images[index])
+        temp_post_image = imread(self.post_images[index])
+        temp_building_target = Image.open(self.building_targets[index])
+        temp_damage_target = Image.open(self.damage_targets[index])
 
         # 转换图像格式
         pre_image = self.to_tensor(temp_pre_image)

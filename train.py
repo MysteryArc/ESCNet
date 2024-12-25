@@ -62,7 +62,7 @@ def main():
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
     LR = 0.002
-    NUM_EPOCH = 20
+    NUM_EPOCH = 10
     BATCH_SIZE = 10
     MOMENTUM = 0.9
     ETA_POS = 2
@@ -76,8 +76,8 @@ def main():
     else:
         raise Exception("No cuda available.")
     
-    train_loader = DataLoader(train_set, BATCH_SIZE, num_workers=8, pin_memory=True)
-    val_loader = DataLoader(val_set, BATCH_SIZE, num_workers=8, pin_memory=True)
+    train_loader = DataLoader(train_set, BATCH_SIZE, pin_memory=True, num_workers=4)
+    val_loader = DataLoader(val_set, BATCH_SIZE, pin_memory=True, num_workers=4)
     model = ESCNet(
         FeatureConverter(ETA_POS, GAMMA_CLR, OFFSETS), 
         n_iters=5, 
