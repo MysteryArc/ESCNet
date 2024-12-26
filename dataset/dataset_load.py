@@ -38,12 +38,9 @@ class GetDataset(Dataset):
         Directory structure:
             /path/to/dataset
             |-train
-            |   |-images
-            |   |  |-pre
-            |   |  |_post
+            |   |-pre
+            |   |_post
             |   |_targets
-            |      |-pre
-            |      |_post
             |-val
             |_test
         '''
@@ -51,35 +48,29 @@ class GetDataset(Dataset):
         super().__init__()
         self.pre_images = []
         self.post_images = []
-        self.building_targets = []
-        self.damage_targets = []
+        self.targets = []
         # 进入数据集目录
-        self.pre_img_dir = os.path.join(root_dir, 'pre', 'images')
-        self.pre_tgt_dir = os.path.join(root_dir, 'pre', 'targets')
-        self.post_img_dir = os.path.join(root_dir, 'post', 'images')
-        self.post_tgt_dir = os.path.join(root_dir, 'post', 'targets')
+        self.pre_img_dir = os.path.join(root_dir, 'pre')
+        self.post_img_dir = os.path.join(root_dir, 'post')
+        self.target_dir = os.path.join(root_dir, 'targets')
         
         # 获取目录下文件名列表
         self.pre_img_list = os.listdir(self.pre_img_dir)
         self.post_img_list = os.listdir(self.post_img_dir)
-        self.pre_tgt_list = os.listdir(self.pre_tgt_dir)
-        self.post_tgt_list = os.listdir(self.post_tgt_dir)
-        if len(self.pre_img_list) != len(self.post_img_list) or len(self.pre_img_list) != len(self.pre_tgt_list) or len(self.pre_img_list) != len(self.post_tgt_list):
-            raise ValueError("数据集数量不正确!")
+        self.target_list = os.listdir(self.target_dir)
+        if len(self.pre_img_list) != len(self.post_img_list) or len(self.pre_img_list) != len(self.target_list):
+            raise ValueError('数据集数量不正确.')
         
         for image_name in self.pre_img_list:
             pre_img_name = image_name
             post_img_name = pre_img_name.replace('pre_disaster', 'post_disaster')
-            pre_tgt_name = pre_img_name.replace('disaster', 'disaster_target')
-            post_tgt_name = post_img_name.replace('disaster', 'disaster_target')
+            target_name = post_img_name.replace('disaster', 'disaster_target')
             pre_img_path = os.path.join(self.pre_img_dir, pre_img_name)
             post_img_path = os.path.join(self.post_img_dir, post_img_name)
-            pre_tgt_path = os.path.join(self.pre_tgt_dir, pre_tgt_name)
-            post_tgt_path = os.path.join(self.post_tgt_dir, post_tgt_name)
+            target_path = os.path.join(self.target_dir, target_name)
             self.pre_images.append(pre_img_path)
             self.post_images.append(post_img_path)
-            self.building_targets.append(pre_tgt_path)
-            self.damage_targets.append(post_tgt_path)
+            self.targets.append(target_path)
 
         self.transforms_target = transforms.Compose(
             [
@@ -128,20 +119,18 @@ class GetDataset(Dataset):
         # 读取图像
         temp_pre_image = imread(self.pre_images[index])
         temp_post_image = imread(self.post_images[index])
-        temp_building_target = Image.open(self.building_targets[index])
-        temp_damage_target = Image.open(self.damage_targets[index])
+        temp_damage_target = Image.open(self.targets[index])
 
         # 转换图像格式
         pre_image = self.to_tensor(temp_pre_image)
         post_image = self.to_tensor(temp_post_image)
-        building_target = self.transforms_target(temp_building_target)
         damage_target = self.transforms_target(temp_damage_target)
 
         # 调试：检查转换后的目标图像的唯一值
         # print("Building unique values:", building_target.unique())
         # print("Damage unique values:", damage_target.unique())
 
-        return pre_image, post_image, building_target, damage_target
+        return pre_image, post_image, damage_target
     
     def __len__(self):
         return len(self.pre_img_list)

@@ -40,7 +40,7 @@ def compute_metrics(conf_matrix):
         ious.append(tp / denom if denom else 0)
     miou = np.mean(ious)
 
-    # F1 score (standard)
+    # F1 score (macro)
     f1s = []
     for c in range(num_classes):
         tp = conf_matrix[c, c]
@@ -50,25 +50,19 @@ def compute_metrics(conf_matrix):
         recall = tp / denom_r if denom_r else 0
         f1c = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0
         f1s.append(f1c)
-
-    # F1 score (damage)
-    f1_c1 = 1 / f1s[1] if f1s[1] else 0
-    f1_c2 = 1 / f1s[2] if f1s[2] else 0
-    f1_c3 = 1 / f1s[3] if f1s[3] else 0
-    f1_c4 = 1 / f1s[4] if f1s[4] else 0
-    f1_damage = 4 / (f1_c1 + f1_c2 + f1_c3 + f1_c4) if (f1_c1 + f1_c2 + f1_c3 + f1_c4) else 0
+    f1_score = np.mean(f1s)
 
     # Overall Accuracy
     oa = conf_matrix.trace() / conf_matrix.sum()
 
-    return miou, f1_damage, oa
+    return miou, f1_score, oa
 
 def main():
     # 初始化参数
-    DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
     LR = 0.01
-    NUM_EPOCH = 20
+    NUM_EPOCH = 100
     BATCH_SIZE = 4
     MOMENTUM = 0.9
     ETA_POS = 2
@@ -117,7 +111,7 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             # 前向传播
-            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
             loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
             train_loss += loss
 
@@ -137,8 +131,8 @@ def main():
         train_loss /= len(train_loader)
 
         # 计算评价指标
-        miou_train, f1_train, oa_train = compute_metrics(conf_matrix)
-        print('Epoch: {} \t Training Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}, LR: {}'.format(i + 1, train_loss, miou_train,f1_train,oa_train, scheduler.get_last_lr()))
+        miou_train, f1_score_train, oa_train = compute_metrics(conf_matrix)
+        print('Epoch: {} \t Training Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}, LR: {}'.format(i + 1, train_loss, miou_train,f1_score_train,oa_train, scheduler.get_last_lr()))
 
         # 验证循环
         model.eval()
@@ -151,7 +145,7 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             with torch.no_grad():
-                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
                 loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
                 val_loss += loss.item()
                 preds = torch.argmax(prob, dim=1)
@@ -159,8 +153,8 @@ def main():
 
         # 计算评价指标
         val_loss = val_loss / len(val_loader)
-        miou_val, f1_val, oa_val = compute_metrics(conf_matrix)
-        print('Epoch: {} \t Validation Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}'.format(i + 1, val_loss, miou_val, f1_val, oa_val))
+        miou_val, f1_score_val, oa_val = compute_metrics(conf_matrix)
+        print('Epoch: {} \t Validation Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}'.format(i + 1, val_loss, miou_val, f1_score_val, oa_val))
 
         now = time.time()
         print("第{}轮训练的时长为{:.1f}秒".format(i + 1, now - last_time))
@@ -168,7 +162,7 @@ def main():
 
         #模型保存
         if val_loss < best_loss:
-            save_path = './checkpoints/escnet_241226.pt'
+            save_path = './checkpoints/escnet_241226_without_merge.pt'
             torch.save(model, save_path)
             best_loss = val_loss
             # print('save')
