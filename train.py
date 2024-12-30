@@ -4,7 +4,7 @@ import os
 import time
 from torch.utils.data import DataLoader, Subset
 from dataset.dataset_load import GetDataset
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from escnet import ESCNet
 from utils import FeatureConverter
 from tqdm import tqdm
@@ -29,55 +29,56 @@ def update_confusion_matrix(conf_matrix, preds, labels):
     return conf_matrix
 
 def compute_metrics(conf_matrix):
+    # 计算损伤分类指标
     num_classes = conf_matrix.shape[0]
-    # mIoU
     ious = []
+    f1s = []
     for c in range(num_classes):
         tp = conf_matrix[c, c]
         fp = conf_matrix[:, c].sum() - tp
         fn = conf_matrix[c, :].sum() - tp
         denom = tp + fp + fn
         ious.append(tp / denom if denom else 0)
-    miou = np.mean(ious)
-
-    # F1 score (standard)
-    f1s = []
-    for c in range(num_classes):
-        tp = conf_matrix[c, c]
-        denom_p = conf_matrix[:, c].sum()
-        denom_r = conf_matrix[c, :].sum()
-        precision = tp / denom_p if denom_p else 0
-        recall = tp / denom_r if denom_r else 0
-        f1c = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0
+        f1c = (2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) else 0
         f1s.append(f1c)
+    # 计算miou和F1 score (damage)
+    ious = np.array(ious)
+    f1s_np = np.array(f1s[1:])
+    miou = np.mean(ious)
+    f1_damage = 4 / np.sum(1.0 / (f1s_np + 1e-6))
 
-    # F1 score (damage)
-    f1_c1 = 1 / f1s[1] if f1s[1] else 0
-    f1_c2 = 1 / f1s[2] if f1s[2] else 0
-    f1_c3 = 1 / f1s[3] if f1s[3] else 0
-    f1_c4 = 1 / f1s[4] if f1s[4] else 0
-    f1_damage = 4 / (f1_c1 + f1_c2 + f1_c3 + f1_c4) if (f1_c1 + f1_c2 + f1_c3 + f1_c4) else 0
+    # 计算建筑定位性能指标, 合并类别 1, 2, 3, 4 为一类
+    binary_conf_matrix = np.zeros((2, 2), dtype=np.int32)
+    
+    # 类别 0：背景类, 类别 1：建筑类
+    binary_conf_matrix[0, 0] = conf_matrix[0, 0]  # 真实 0 -> 预测 0
+    binary_conf_matrix[0, 1] = conf_matrix[0, 1:].sum()  # 真实 0 -> 预测 1, 2, 3, 4
+    binary_conf_matrix[1, 0] = conf_matrix[1:, 0].sum()  # 真实 1, 2, 3, 4 -> 预测 0
+    binary_conf_matrix[1, 1] = conf_matrix[1:, 1:].sum()  # 真实 1, 2, 3, 4 -> 预测 1, 2, 3, 4
+    
+    # 计算 F1
+    tp_loc = binary_conf_matrix[1, 1]
+    fp_loc = binary_conf_matrix[0, 1]
+    fn_loc = binary_conf_matrix[1, 0]
 
-    # Overall Accuracy
-    oa = conf_matrix.trace() / conf_matrix.sum()
+    f1_location = 2 * tp_loc / (2 * tp_loc + fp_loc + fn_loc) if (2 * tp_loc + fp_loc + fn_loc) else 0
 
-    return miou, f1_damage, oa
+    return miou, f1_location, f1_damage, f1s[1], f1s[2], f1s[3], f1s[4]
 
 def main():
     # 初始化参数
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
-    LR = 0.01
+    LR = 0.002
     NUM_EPOCH = 20
-    BATCH_SIZE = 4
-    MOMENTUM = 0.9
+    BATCH_SIZE = 20
     ETA_POS = 2
     GAMMA_CLR = 0.1
     OFFSETS = (0.0, 0.0, 0.0, 0.0, 0.0)
     train_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256\\train")
-    train_set = Subset(train_set, range(16000))
+    # train_set = Subset(train_set, range(16000))
     val_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256\\val")
-    val_set = Subset(val_set, range(1600))
+    # val_set = Subset(val_set, range(1600))
 
     if torch.cuda.is_available():
         print("Running on cuda: epoch={}, batchsize={}".format(NUM_EPOCH, BATCH_SIZE))
@@ -98,8 +99,8 @@ def main():
 
     # 定义损失函数、优化器、学习率调度器
     creterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=1e-5)
-    scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCH, eta_min=1e-6)
 
     # 训练循环
     start_time = time.time()
@@ -137,8 +138,8 @@ def main():
         train_loss /= len(train_loader)
 
         # 计算评价指标
-        miou_train, f1_train, oa_train = compute_metrics(conf_matrix)
-        print('Epoch: {} \t Training Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}, LR: {}'.format(i + 1, train_loss, miou_train,f1_train,oa_train, scheduler.get_last_lr()))
+        miou_train, f1_loc_train, f1_dam_train, f1_c1, f1_c2, f1_c3, f1_c4 = compute_metrics(conf_matrix)
+        print('Epoch: {} \t Training Loss: {:.6f}, mIoU: {:.4f}, f1_loc: {:.4f}, f1_dam: {:.4f}, no: {:.4f}, minor: {:.4f}, major: {:.4f}, destroyed: {:.4f}, LR: {}'.format(i + 1, train_loss, miou_train, f1_loc_train, f1_dam_train, f1_c1, f1_c2, f1_c3, f1_c4, scheduler.get_last_lr()))
 
         # 验证循环
         model.eval()
@@ -159,8 +160,8 @@ def main():
 
         # 计算评价指标
         val_loss = val_loss / len(val_loader)
-        miou_val, f1_val, oa_val = compute_metrics(conf_matrix)
-        print('Epoch: {} \t Validation Loss: {:.7f}, mIoU: {:.4f}, f1: {:.4f}, oa: {:.4f}'.format(i + 1, val_loss, miou_val, f1_val, oa_val))
+        miou_val, f1_loc_val, f1_dam_val, f1_c1_val, f1_c2_val, f1_c3_val, f1_c4_val = compute_metrics(conf_matrix)
+        print('Epoch: {} \t Validation Loss: {:.6f}, mIoU: {:.4f}, f1_loc: {:.4f}, f1_dam: {:.4f}, no: {:.4f}, minor: {:.4f}, major: {:.4f}, destroyed: {:.4f}'.format(i + 1, val_loss, miou_val, f1_loc_val, f1_dam_val, f1_c1_val, f1_c2_val, f1_c3_val, f1_c4_val))
 
         now = time.time()
         print("第{}轮训练的时长为{:.1f}秒".format(i + 1, now - last_time))
@@ -168,8 +169,8 @@ def main():
 
         #模型保存
         if val_loss < best_loss:
-            save_path = './checkpoints/escnet_241226.pt'
-            torch.save(model, save_path)
+            save_path = './checkpoints/escnet_241227.pth'
+            torch.save(model.state_dict(), save_path)
             best_loss = val_loss
             # print('save')
     end_time = time.time()
