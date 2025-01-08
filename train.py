@@ -4,7 +4,7 @@ import os
 import time
 from torch.utils.data import DataLoader, Subset
 from dataset.dataset_load import GetDataset
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from escnet import ESCNet
 from utils import FeatureConverter
 from tqdm import tqdm
@@ -48,7 +48,7 @@ def compute_metrics(conf_matrix):
     f1_damage = 4 / np.sum(1.0 / (f1s_np + 1e-6))
 
     # 计算建筑定位性能指标, 合并类别 1, 2, 3, 4 为一类
-    binary_conf_matrix = np.zeros((2, 2), dtype=np.int32)
+    binary_conf_matrix = np.zeros((2, 2), dtype=np.int64)
     
     # 类别 0：背景类, 类别 1：建筑类
     binary_conf_matrix[0, 0] = conf_matrix[0, 0]  # 真实 0 -> 预测 0
@@ -69,28 +69,26 @@ def main():
     # 初始化参数
     DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
-    LR = 0.002
-    NUM_EPOCH = 20
-    BATCH_SIZE = 20
+    LR = 0.001
+    NUM_EPOCH = 50
+    BATCH_SIZE = 8
     ETA_POS = 2
     GAMMA_CLR = 0.1
     OFFSETS = (0.0, 0.0, 0.0, 0.0, 0.0)
-    train_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256\\train")
-    # train_set = Subset(train_set, range(16000))
-    val_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256\\val")
-    # val_set = Subset(val_set, range(1600))
+    train_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256_lite\\train")
+    val_set = GetDataset("C:\\Users\\why\\Desktop\\xView2dataset\\x256_lite\\val")
 
     if torch.cuda.is_available():
         print("Running on cuda: epoch={}, batchsize={}".format(NUM_EPOCH, BATCH_SIZE))
     else:
         raise Exception("No cuda available.")
     
-    train_loader = DataLoader(train_set, BATCH_SIZE, pin_memory=True, drop_last=True, num_workers=2)
-    val_loader = DataLoader(val_set, BATCH_SIZE, pin_memory=True, num_workers=2)
+    train_loader = DataLoader(train_set, BATCH_SIZE, pin_memory=True, drop_last=True, num_workers=8)
+    val_loader = DataLoader(val_set, BATCH_SIZE, pin_memory=True, num_workers=8)
     model = ESCNet(
         FeatureConverter(ETA_POS, GAMMA_CLR, OFFSETS), 
         n_iters=5, 
-        n_spixels=256, 
+        n_spixels=256,
         n_filters=64, 
         in_ch=5, 
         out_ch=20
@@ -99,8 +97,10 @@ def main():
 
     # 定义损失函数、优化器、学习率调度器
     creterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
-    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCH, eta_min=1e-6)
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
+    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9, weight_decay=1e-5)
+    # scheduler = StepLR(optimizer, step_size=10, gamma=0.5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCH, eta_min=1e-5)
 
     # 训练循环
     start_time = time.time()
@@ -118,7 +118,7 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             # 前向传播
-            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
             loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
             train_loss += loss
 
@@ -152,7 +152,7 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             with torch.no_grad():
-                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
                 loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
                 val_loss += loss.item()
                 preds = torch.argmax(prob, dim=1)
@@ -169,7 +169,7 @@ def main():
 
         #模型保存
         if val_loss < best_loss:
-            save_path = './checkpoints/escnet_241227.pth'
+            save_path = './checkpoints/escnet_250106_without_merge.pth'
             torch.save(model.state_dict(), save_path)
             best_loss = val_loss
             # print('save')
