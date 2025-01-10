@@ -72,13 +72,26 @@ class GetDataset(Dataset):
             self.post_images.append(post_img_path)
             self.targets.append(target_path)
 
-        self.transforms_target = transforms.Compose(
-            [
-                transforms.Lambda(self.to_target),  # 将图像转换为张量
-            ]
-        )
+    def __getitem__(self, index):
+        # 读取图像
+        temp_pre_image = Image.open(self.pre_images[index]).copy()
+        temp_post_image = Image.open(self.post_images[index]).copy()
+        temp_damage_target = Image.open(self.targets[index]).copy()
 
-    def to_target(self, target_image):
+        # 转换图像格式
+        pre_image = self.image2tensor(temp_pre_image)
+        post_image = self.image2tensor(temp_post_image)
+        damage_target = self.target2tensor(temp_damage_target)
+
+        # 调试：检查转换后的目标图像的唯一值
+        # print("Damage unique values:", damage_target.unique())
+
+        return pre_image, post_image, damage_target
+    
+    def __len__(self):
+        return len(self.pre_img_list)
+    
+    def target2tensor(self, target_image):
         '''
         由于target图像中的像素值只有0、1、2、3、4, 直接使用toTensor()函数会使像素值从[0, 255]归一化到[0, 1]区间, 此方法会将图像先转成numpy数组再转换成张量, 维持原来的像素值不变.
 
@@ -100,7 +113,7 @@ class GetDataset(Dataset):
         
         return target_tensor
     
-    def to_tensor(self, image):
+    def image2tensor(self, image):
         '''
         将图像转换为xylab格式再转换为张量
 
@@ -114,23 +127,3 @@ class GetDataset(Dataset):
         image_xylab = rgb_to_xylab(image)
         image_tensor = torch.tensor(image_xylab).permute(2, 0, 1).float()
         return image_tensor
-
-    def __getitem__(self, index):
-        # 读取图像
-        temp_pre_image = imread(self.pre_images[index])
-        temp_post_image = imread(self.post_images[index])
-        temp_damage_target = Image.open(self.targets[index])
-
-        # 转换图像格式
-        pre_image = self.to_tensor(temp_pre_image)
-        post_image = self.to_tensor(temp_post_image)
-        damage_target = self.transforms_target(temp_damage_target)
-
-        # 调试：检查转换后的目标图像的唯一值
-        # print("Building unique values:", building_target.unique())
-        # print("Damage unique values:", damage_target.unique())
-
-        return pre_image, post_image, damage_target
-    
-    def __len__(self):
-        return len(self.pre_img_list)
