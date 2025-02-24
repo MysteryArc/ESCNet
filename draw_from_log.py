@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import re
 
 # 读取日志文件并提取数据
-with open('logs\\241227_with_merge.txt', 'r', encoding='utf-16') as file:
+with open('logs\\250217_with_merge.txt', 'r', encoding='utf-16') as file:
     log_data = file.readlines()
 
 # 定义正则表达式模式

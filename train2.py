@@ -2,29 +2,35 @@ import torch
 import numpy as np
 import os
 import time
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from dataset.dataset_load import GetDataset
+from dataset.dataset_load_preloaded import PreloadDataset
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from escnet import ESCNet
 from utils import FeatureConverter
 from tqdm import tqdm
+from sklearn.metrics import confusion_matrix
 
-def update_confusion_matrix(conf_matrix, preds, labels):
+import numpy as np
+
+def update_confusion_matrix(conf_matrix, preds, labels, num_classes):
     """
-    更新混淆矩阵
+    高效更新混淆矩阵
     Args:
-        conf_matrix:    当前的混淆矩阵
-        preds:          模型预测值，形状为 (batch_size, height, width)
-        labels:         真实标签，形状为 (batch_size, height, width)
+        conf_matrix: 当前的混淆矩阵 (num_classes, num_classes)
+        preds:       模型预测值，形状为 (batch_size, height, width)
+        labels:      真实标签，形状为 (batch_size, height, width)
+        num_classes: 类别总数
 
     Returns:
-        conf_matrix: 更新后的混淆矩阵
+        更新后的混淆矩阵
     """
     preds_flat = preds.view(-1).long().cpu().numpy()
     labels_flat = labels.view(-1).long().cpu().numpy()
 
-    for p, t in zip(preds_flat, labels_flat):
-        conf_matrix[t, p] += 1
+    # 计算混淆矩阵索引
+    indices = labels_flat * num_classes + preds_flat
+    conf_matrix += np.bincount(indices, minlength=num_classes**2).reshape(num_classes, num_classes)
 
     return conf_matrix
 
@@ -67,10 +73,10 @@ def compute_metrics(conf_matrix):
 
 def main():
     # 初始化参数
-    DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     NUM_CLASSES = 5
-    LR = 0.001
-    NUM_EPOCH = 60
+    LR = 0.0001
+    NUM_EPOCH = 100
     BATCH_SIZE = 8
     ETA_POS = 2
     GAMMA_CLR = 0.1
@@ -83,60 +89,56 @@ def main():
     else:
         raise Exception("No cuda available.")
     
-    train_loader = DataLoader(train_set, BATCH_SIZE, pin_memory=True, drop_last=True, num_workers=8)
-    val_loader = DataLoader(val_set, BATCH_SIZE, pin_memory=True, num_workers=8)
+    train_loader = DataLoader(train_set, BATCH_SIZE, drop_last=True, num_workers=16, pin_memory=True)
+    val_loader = DataLoader(val_set, BATCH_SIZE, num_workers=16, pin_memory=True)
     model = ESCNet(
         FeatureConverter(ETA_POS, GAMMA_CLR, OFFSETS), 
-        n_iters=5,
+        n_iters=5, 
         n_spixels=256,
-        n_filters=64, 
+        n_filters=32, 
         in_ch=5, 
         out_ch=20
     )
+    # model.load_state_dict(torch.load('./checkpoints/escnet_250110_without_merge.pth'))
     model.to(DEVICE)
 
-    # 类别频率
-    class_frequencies = torch.tensor([0.9727945, 0.02067634, 0.00236468, 0.00255511, 0.00160938])
-
-    # 计算类别权重为频率的倒数
-    weights = 1.0 / class_frequencies
-    weights = weights / weights.sum()  # 归一化，使权重总和为 1
-
     # 定义损失函数、优化器、学习率调度器
-    creterion = torch.nn.CrossEntropyLoss(weight=weights.to(DEVICE))
+    creterion = torch.nn.CrossEntropyLoss().to(DEVICE)
     # optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
-    optimizer = torch.optim.SGD(model.parameters(), lr=LR, weight_decay=1e-2)
-    # scheduler = StepLR(optimizer, step_size=6, gamma=0.5)
-    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCH, eta_min=1e-7)
+    optimizer = torch.optim.SGD(model.parameters(), lr=LR, weight_decay=1e-4)
+    # scheduler = StepLR(optimizer, step_size=10, gamma=0.5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCH, eta_min=1e-8)
 
     # 训练循环
     start_time = time.time()
     last_time = start_time
     best_loss = 100
-    for i in range(NUM_EPOCH):
+    for i in range(0, NUM_EPOCH + 0):
         model.train()
         train_loss = 0
         conf_matrix = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
 
         for pre_image, post_image, damage_target in tqdm(train_loader, desc='Epoch {} Training'.format(i + 1)):
+            # 梯度清零
+            optimizer.zero_grad()
             # 加载图像
             pre_image = pre_image.to(DEVICE)
             post_image = post_image.to(DEVICE)
             target = damage_target.to(DEVICE).long()
 
             # 前向传播
-            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
-            loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
+            prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
+            # loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
+            loss = creterion(prob, target)
             train_loss += loss
 
             # 反向传播
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             # 更新混淆矩阵
             preds = torch.argmax(prob, dim=1)
-            conf_matrix = update_confusion_matrix(conf_matrix, preds, target)
+            conf_matrix = update_confusion_matrix(conf_matrix, preds, target, NUM_CLASSES)
 
         # 更新学习率
         scheduler.step()
@@ -159,11 +161,11 @@ def main():
             target = damage_target.to(DEVICE).long()
 
             with torch.no_grad():
-                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=True)
+                prob, prob_ds, (Q1, Q2), (ops1, ops2), (f1, f2) = model(pre_image, post_image, merge=False)
                 loss = creterion(prob, target) + 0.5 * creterion(prob_ds, target)
                 val_loss += loss.item()
                 preds = torch.argmax(prob, dim=1)
-                conf_matrix = update_confusion_matrix(conf_matrix, preds, target)
+                conf_matrix = update_confusion_matrix(conf_matrix, preds, target, NUM_CLASSES)
 
         # 计算评价指标
         val_loss = val_loss / len(val_loader)
@@ -176,7 +178,7 @@ def main():
 
         #模型保存
         if val_loss < best_loss:
-            save_path = './checkpoints/escnet_250217.pth'
+            save_path = './checkpoints/escnet_250221_without_merge.pth'
             torch.save(model.state_dict(), save_path)
             best_loss = val_loss
             # print('save')

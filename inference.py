@@ -124,7 +124,7 @@ def to_tensor(image):
     return image_tensor
 
 def main():
-    PATH = 'C:\\Users\\why\\Desktop\\xView2dataset\\x256\\result'
+    PATH = 'C:\\Users\\why\\Desktop\\result'
     if not os.path.exists(PATH):
         os.makedirs(PATH)
     NUM_CLASSES = 5
@@ -141,7 +141,7 @@ def main():
         in_ch=5,
         out_ch=20
     )
-    model.load_state_dict(torch.load('./checkpoints/escnet_241226_without_merge.pth', map_location=DEVICE))
+    model.load_state_dict(torch.load('./checkpoints/escnet_250116.pth', map_location=DEVICE))
     model.to(DEVICE)
 
     model.eval()
